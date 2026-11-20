@@ -1,0 +1,95 @@
+name: Build Beautiful Wife 8.0 Windows PC
+
+on:
+workflow_dispatch:
+
+jobs:
+build:
+runs-on: windows-latest
+
+steps:  
+  - name: Install Python  
+    uses: actions/setup-python@v5  
+    with:  
+      python-version: '3.12'  
+
+  - name: Download original game ZIP  
+    shell: pwsh  
+    run: |  
+      python -m pip install gdown  
+      python -m gdown "https://drive.google.com/file/d/1MXS8NlMRMsDpJE_S3K1wUVMeTa3CFAbj/view?usp=drivesdk" -O game.zip  
+
+  - name: Extract original game  
+    shell: pwsh  
+    run: |  
+      Expand-Archive game.zip -DestinationPath extracted -Force  
+      $index = Get-ChildItem extracted -Filter index.html -Recurse | Select-Object -First 1  
+      if (-not $index) { throw "index.html not found" }  
+      New-Item -ItemType Directory -Force app | Out-Null  
+      Copy-Item "$($index.Directory.FullName)\*" app -Recurse -Force  
+
+  - name: Prepare Electron  
+    shell: pwsh  
+    run: |  
+      Set-Location app  
+      npm init -y  
+      npm install --save-dev electron electron-builder  
+
+      $main = @'  
+      const { app, BrowserWindow } = require('electron');  
+      const path = require('path');  
+
+      function createWindow() {  
+        const win = new BrowserWindow({  
+          width: 1280,  
+          height: 800,  
+          minWidth: 900,  
+          minHeight: 600,  
+          autoHideMenuBar: true,  
+          webPreferences: {  
+            contextIsolation: true,  
+            nodeIntegration: false  
+          }  
+        });  
+
+        win.loadFile(path.join(__dirname, 'index.html'));  
+      }  
+
+      app.whenReady().then(createWindow);  
+
+      app.on('window-all-closed', () => {  
+        if (process.platform !== 'darwin') app.quit();  
+      });  
+      '@  
+
+      Set-Content -Path (Join-Path $PWD 'main.cjs') -Value $main -Encoding utf8  
+
+      if (!(Test-Path '.\main.cjs')) {  
+        throw "main.cjs was not created!"  
+      }  
+
+      npm pkg set main=main.cjs  
+      npm pkg set version=8.0.0  
+
+      npm pkg set "build.appId=com.beautifulwife.story"  
+      npm pkg set "build.productName=Beautiful Wife 18+ Version 8.0"  
+      npm pkg set "build.directories.output=release"  
+
+      npm pkg set "build.win.target[0].target=nsis"  
+      npm pkg set "build.win.target[0].arch[0]=x64"  
+
+      npm pkg set "build.nsis.oneClick=false"  
+      npm pkg set "build.nsis.allowToChangeInstallationDirectory=true"  
+
+      npm pkg set "build.files[0]=**/*"  
+
+  - name: Build Windows Installer  
+    working-directory: app  
+    run: npx electron-builder --win nsis --x64  
+
+  - name: Upload Windows Installer  
+    uses: actions/upload-artifact@v4  
+    with:  
+      name: Beautiful-Wife-18-Version-8.0-Installer-x64  
+      path: app/release/*.exe  
+      if-no-files-found: error
